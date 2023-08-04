@@ -1,0 +1,1054 @@
+===================================================================================
+=================================== EXACT AND ORTH DMD TEST =======================
+===================================================================================
+
+% rng(1); % Set random seed
+n = 10; % Number of features
+m = 1e3; % Number of samples
+
+% Generate an orthogonal model
+[trueA,~,~] = svd(randn(n));
+trueVals = eig(trueA);
+
+% Generate random but consistent data
+X = randn(n,m);
+Y = trueA*X;
+
+% Make the data noisy
+noiseMag = .5;
+Yn = Y + noiseMag*randn(size(Y));
+Xn = X + noiseMag*randn(size(X));
+
+% Train the models
+[nx, nt] = size(Xn);
+r = min(nx,nt);
+% Exact DMD
+[Ux,Sx,Vx] = svd(Xn,0);
+Ux = Ux(:,1:r); Sx = Sx(1:r,1:r); Vx = Vx(:,1:r);
+Atilde = (Ux'*Yn)*Vx*pinv(Sx);
+exA = @(v) Ux*(Atilde*(Ux'*v));
+% Eigendecomposition
+[exVecs,exVals] = eig(Atilde);
+exVals = diag(exVals);
+exVecs = Yn*Vx*pinv(Sx)*exVecs./exVals.';
+
+% Energy preserving DMD
+[Ux,~,~] = svd(Xn,0);
+Ux = Ux(:,1:r);
+% Project X and Y onto principal components
+Yproj = Ux'*Yn; Xproj = Ux'*Xn;
+[Uyx, ~, Vyx] = svd(Yproj*Xproj',0);
+Aproj = Uyx*Vyx';
+piA = @(x) Ux*(Aproj*(Ux'*x));
+% Eigendecomposition
+[piVecs,piVals] = eig(Aproj);
+piVals = diag(piVals);
+piVecs = Ux*piVecs;
+
+% Display the error between the learned operators
+I = eye(n);
+disp(['piDMD orthogonal model error is ' num2str(norm(piA(I) - trueA,'fro')...
+/norm(trueA,'fro'), 16)])
+disp(['exact DMD model error is ' num2str(norm(exA(I) - trueA,'fro')...
+/norm(trueA,'fro'), 16)])
+
+
+===================================================================================
+=========================== Pendulum ==============================================
+===================================================================================
+
+
+% Define parameters of problem
+l1=1; l2=1.5; % Lengths of rods
+m1=1 ; m2=1.5; g=9.81; % Masses and gravity
+params = [l1, l2, m1, m2, g]; % Concatenate parameters
+
+% Construct linearised energy inner product
+W(1,1) = (m1/2+m2/2)*g*l1;
+W(2,2) = m2/2*g*l2;
+W(3,3) = (m1/2+m2/2)*l1^2;
+W(4,3) = m2/2*l1*l2;
+W(3,4) = W(4,3);
+W(4,4) = m2/2*l2^2;
+C = chol(W); % Calculate inner product
+
+% Set number of samples and span
+tend = 30; nt = 1000;
+tspan= linspace(0,tend,nt);
+
+% Set initial conditions
+theta1= 0.4; theta1_prime=0;
+theta2= 0.7; theta2_prime=0;
+y0=[theta1 theta1_prime theta2 theta2_prime];
+
+function yp = pendulum(~, y, params)
+
+l1=params(1);  l2=params(2); 
+m1=params(3);  m2=params(4); 
+g=params(5);
+
+a = (m1+m2)*l1 ;
+b = m2*l2*cos(y(1)-y(3)) ;
+c = m2*l1*cos(y(1)-y(3)) ;
+d = m2*l2 ;
+e = -m2*l2*y(4)* y(4)*sin(y(1)-y(3))-g*(m1+m2)*sin(y(1)) ;
+f = m2*l1*y(2)*y(2)*sin(y(1)-y(3))-m2*g*sin(y(3)) ;
+yp=zeros(4,1);
+yp(1) = y(2);
+yp(3)= y(4) ;
+yp(2)= (e*d-b*f)/(a*d-c*b) ;
+yp(4)= (a*f-c*e)/(a*d-c*b) ;
+end
+
+% Solve ODE
+[t,y]=ode45(@(t,y) pendulum(t,y,params), tspan,y0);
+
+% Extract data
+th1 = y(:,1);
+th2 = y(:,3);
+th1dt = y(:,2);
+th2dt = y(:,4);
+x = [th1'; th2'; th1dt'; th2dt'];
+
+
+===================================================================================
+======================== RQ / QR / Upper-/Lower-triangular ========================
+===================================================================================
+
+
+% RQ / QR / Upper-/Lower-triangular
+A = [1, 2, 3; 4, 5, 6; 7, 8, 9; 10, 11, 12];
+
+function [R,Q,varargout] = rq(A)
+
+n = size(A,1);
+if nargout<3
+    [Q,R] = qr(flipud(A)',0);
+else
+    [Q,R,P1] = qr(flipud(A)',0);
+    P(n+1-P1) = n:-1:1; % arrange permutation in right way
+    varargout{1} = P;
+end
+R = rot90(R',2);
+Q = flipud(Q');
+
+[n,m]=size(A);
+
+if n>m
+    R = [zeros(n,n-m), R];
+    Q = [zeros(n-m,m); Q];
+end  
+
+end
+
+[R, Q] = rq(A');
+
+% Tests
+n = 10; % Number of features
+m = 1e+3; % Number of samples
+
+% generate a causal model
+% trueA = triu(randn(n));
+trueA = tril(randn(n));
+trueVals = eig(trueA);
+
+% Generate random but consistent data
+X = randn(n,m);
+Y = trueA*X;
+
+% Make the data noisy
+noiseMag = .5;
+Yn = Y + noiseMag*randn(size(Y));
+Xn = X + noiseMag*randn(size(X));
+
+% Train the models
+[nx, nt] = size(Xn);
+r = min(nx,nt);
+% Exact DMD
+[Ux,Sx,Vx] = svd(Xn,0);
+Ux = Ux(:,1:r); Sx = Sx(1:r,1:r); Vx = Vx(:,1:r);
+Atilde = (Ux'*Yn)*Vx*pinv(Sx);
+exA = @(v) Ux*(Atilde*(Ux'*v));
+% Eigendecomposition
+[exVecs,exVals] = eig(Atilde);
+exVals = diag(exVals);
+exVecs = Yn*Vx*pinv(Sx)*exVecs./exVals.';
+
+% causal piDMD
+% [R,Q] = rq(Xn); % Q*Q' = I
+% Ut = triu(Yn*Q');
+% piA = Ut/R;
+% piVals = eig(trueA);
+
+% anti-causal piDMD
+[R,Q] = rq(flipud(Xn)); % Q*Q' = I
+Ut = triu(flipud(Yn)*Q');
+piA = Ut/R;
+piA = rot90(piA,2);
+piVals = eig(trueA);
+
+% Display the error between the learned operators
+I = eye(n);
+disp(['piDMD causal model error is ' num2str(norm(piA - trueA,'fro')...
+/norm(trueA,'fro'), 16)])
+disp(['exact DMD model error is ' num2str(norm(exA(I) - trueA,'fro')...
+/norm(trueA,'fro'), 16)])
+
+
+===================================================================================
+=============================== Symtridiagonal ====================================
+===================================================================================
+
+
+========= OCTAVE =========:
+A = [1, 2, 3; 4, 5, 6; 7, 8, 9; 10, 11, 12; -1, -3, 6];
+V = [2, 3, 9; 5, 6, 1; 8, 9, -4; 11, 12, -5; -3, 6, 0];
+T1e = vecnorm(A,2,2).^2;
+nx = size(A, 1);
+T1 = spdiags(T1e,0,nx,nx);
+T2e = dot(A(2:end,:),A(1:end-1,:),2);
+T2 = spdiags([T2e T2e],-1:0,nx,nx-1);
+T3e = [0; dot(A(3:end,:),A(1:end-2,:),2)];
+T3 = spdiags(T1e(1:end-1) + T1e(2:end),0,nx-1,nx-1) ...
+     + spdiags(T3e,1,nx-1,nx-1) + spdiags(T3e,1,nx-1,nx-1)';
+T = [T1 T2; T2' T3];
+d = [dot(A,V,2); dot(A(1:end-1,:),V(2:end,:),2) + dot(A(2:end,:),V(1:end-1,:),2)];
+c = real(T)\real(d);
+A_sp = spdiags(c(1:nx),0,nx,nx) + spdiags([0;c(nx+1:end)],1,nx,nx)...
+       + spdiags([c(nx+1:end); 0],-1,nx,nx);
+    
+[eVecs,eVals] = eig(A_sp);
+
+
+========= PYTHON =========:
+A = np.array([[1, 2, 3], [4, 5, 6], [7, 8, 9], [10, 11, 12], [-1, -3, 6]]).T # X
+V = np.array([[2, 3, 9], [5, 6, 1], [8, 9, -4], [11, 12, -5], [-3, 6, 0]]).T # Y
+T1e = LA.norm(A, 2, 1) * LA.norm(A, 2, 1)
+nx = A.shape[0]
+T1 = spdiags(T1e, 0, nx, nx)
+T2e = np.diag(A[1:, :] @ A[:-1, :].conj().T)
+T2 = spdiags(np.vstack((T2e, T2e)), (-1, 0), nx, nx-1)
+T3e = np.insert(
+    np.diag(A[2:, :] @ A[:-2, :].conj().T),
+    0, 0
+)
+T3 = spdiags(T1e[:-1] + T1e[1:], 0, nx-1, nx-1)\
+     + spdiags(T3e, 1, nx-1, nx-1)\
+     + spdiags(T3e, 1, nx-1, nx-1).conj().T
+
+T = vstack((
+    hstack((T1, T2)),
+    hstack((T2.conj().T, T3))
+))
+
+d_up = np.diag(A @ V.conj().T)
+d_down = np.diag(A[:-1, :] @ V[1:, :].conj().T) + np.diag(A[1:, :] @ V[:-1, :].conj().T)
+d = np.hstack((d_up, d_down)) # [:, np.newaxis]
+
+c = LA.inv(T.toarray().real) @ d.real
+
+A_sp = spdiags(c[:nx], 0, nx, nx)\
+    + spdiags(
+        np.insert(c[nx:], 0, 0),
+        1, nx, nx
+    )\
+    + spdiags(
+        np.append(c[nx:], 0),
+        -1, nx, nx
+    )
+
+eVals, eVecs = LA.eig(A_sp.toarray())
+
+
+===================================================================================
+===================================== TLS =========================================
+===================================================================================
+
+
+A = [1, 2, 3; 4, 5, 6; 7, 8, 9; 10, 11, 12; -1, -3, 6];
+B = [2, 3, 9; 5, 6, 1; 8, 9, -4; 11, 12, -5; -3, 6, 0];
+
+
+% Performs RQ decomposition
+function [R,Q,varargout] = rq(A)
+
+n = size(A,1);
+if nargout<3
+    [Q,R] = qr(flipud(A)',0);
+else
+    [Q,R,P1] = qr(flipud(A)',0);
+    P(n+1-P1) = n:-1:1; % arrange permutation in right way
+    varargout{1} = P;
+end
+R = rot90(R',2);
+Q = flipud(Q');
+
+[n,m]=size(A);
+
+if n>m
+    R = [zeros(n,n-m), R];
+    Q = [zeros(n-m,m); Q];
+end  
+
+end
+
+
+function [Xhat] = tls(A,B)
+
+n = size(A,2);
+if size(A,1)~=size(B,1); error('Matrices are not conformant.'); end
+R1 = [A B];
+[~,~,V] = svd(R1,0);
+r = size(A,2);
+R = rq(V(:,r+1:end));Gamma = R(n+1:end,n-r+1:end);
+Z = R(1:n,n-r+1:end);
+Xhat = -Z/Gamma;
+
+end
+
+[Xhat] = tls(A, B)
+
+
+===================================================================================
+=============================== Symmetric / Skewsymmetric =========================
+===================================================================================
+
+
+X = [1, 2, 3; 4, 5, 6; 7, 8, 9; 10, 11, 12; -1, -3, 6];
+Y = [2, 3, 9; 5, 6, 1; 8, 9, -4; 11, 12, -5; -3, 6, 0];
+
+method = "skewsymmetric"
+
+[Ux,S,V] = svd(X,0);
+C = Ux'*Y*V;
+C1 = C;
+r = rank(X); % rank
+Ux = Ux(:,1:r);
+Yf = zeros(r);
+if strcmp(method,'symmetric') 
+    for i = 1:r
+        Yf(i,i) = real(C1(i,i))/S(i,i);
+        for j = i+1:r
+            Yf(i,j) = (S(i,i)*conj(C1(j,i)) + S(j,j)*C1(i,j))...
+                      / (S(i,i)^2 + S(j,j)^2);
+        end
+    end
+    Yf = Yf + Yf' - diag(diag(real(Yf)));
+    
+elseif strcmp(method,'skewsymmetric')
+    for i = 1:r
+        Yf(i,i) = 1i*imag(C1(i,i))/S(i,i);
+        for j = i+1:r
+            Yf(i,j) = (-S(i,i)*conj(C1(j,i)) + S(j,j)*(C1(i,j)))...
+                      / (S(i,i)^2 + S(j,j)^2);
+        end
+    end
+    Yf = Yf - Yf' - 1i*diag(diag(imag(Yf)));
+end
+
+A = @(v) Ux*Yf*(Ux'*v);
+
+[eVecs,eVals] = eig(Yf);
+
+A(eye(5))
+eVals = diag(eVals)
+eVecs = Ux*eVecs
+A(X)
+
+
+===================================================================================
+================ BCCB / BCCBtls / BCCBskewsymmetric / BCCBunitary =================
+===================================================================================
+
+
+=========================== OCTAVE =====================:
+X = [1, 2, 3, 1; 4, 5, 6, 0; 7, 8, 9, 2; 10, 11, 12, -3; -1, -3, 6, 3;...
+     0, 0, -1, 1];
+Y = [2, 3, 1, -2; 5, 6, 0, 0; 8, 9, 2, 1; 11, 12, -3, -3; -3, 6, 3, 2;...
+     0, -1, 1, -1];
+s = [2, 3];
+p = prod(s);
+
+method = 'BCCB';
+rank = 4;
+nx = size(X, 1);
+
+% Performs RQ decomposition
+function [R,Q,varargout] = rq(A)
+
+n = size(A,1);
+if nargout<3
+    [Q,R] = qr(flipud(A)',0);
+else
+    [Q,R,P1] = qr(flipud(A)',0);
+    P(n+1-P1) = n:-1:1; % arrange permutation in right way
+    varargout{1} = P;
+end
+R = rot90(R',2);
+Q = flipud(Q');
+
+[n,m]=size(A);
+
+if n>m
+    R = [zeros(n,n-m), R];
+    Q = [zeros(n-m,m); Q];
+end  
+
+end
+
+function [Xhat] = tls(A,B)
+
+n = size(A,2);
+if size(A,1)~=size(B,1); error('Matrices are not conformant.'); end
+R1 = [A B];
+[~,~,V] = svd(R1,0);
+r = size(A,2);
+R = rq(V(:,r+1:end));Gamma = R(n+1:end,n-r+1:end);
+Z = R(1:n,n-r+1:end);
+Xhat = -Z/Gamma;
+
+end
+
+aF =  @(x) reshape(     fft2(reshape(x ,[s,size(x,2)])) ,[p,size(x,2)])/sqrt(p);
+aFt = @(x) conj(aF(conj(x)));
+fX = aF(conj(X)); fY = aF(conj(Y));
+d = zeros(p,1);
+
+if strcmp(method,'BCCB') 
+for j = 1:p; d(j) = conj(fX(j,:)*fY(j,:)')/norm(fX(j,:)').^2; end
+elseif strcmp(method,'BCCBtls')
+for j = 1:p; d(j) = tls(fX(j,:)',fY(j,:)')'; end
+elseif strcmp(method,'BCCBskewsymmetric')
+for j = 1:p; d(j) = 1i*imag(fY(j,:)/fX(j,:)); end
+elseif strcmp(method,'BCCBsymmetric')
+for j = 1:p; d(j) = real(fY(j,:)/fX(j,:)); end
+elseif strcmp(method,'BCCBunitary')
+for j = 1:p; d(j) = exp(1i*angle(fY(j,:)/fX(j,:))); end
+end
+
+% Returns a function handle that applies A
+reduce_by_rank = 1;
+if reduce_by_rank
+    res = diag(abs(fX*fY'))./vecnorm(fX')';
+    % [~,idx] = mink(res,nx-rank);
+    disp(res);
+    % d(idx) = 0;
+end
+
+A = @(x) aF((conj(d).*aFt(x)));
+eVals = d;
+[eVecs, _] = eig(A(eye(nx)));
+
+A(eye(nx))
+eVals
+eVecs
+
+
+=========================== PYTHON =====================:
+X = np.array([[1, 2, 3, 1], [4, 5, 6, 0], [7, 8, 9, 2], [10, 11, 12, -3], [-1, -3, 6, 3], [0, 0, -1, 1]])
+Y = np.array([[2, 3, 1, -2], [5, 6, 0, 0], [8, 9, 2, 1], [11, 12, -3, -3], [-3, 6, 3, 2], [0, -1, 1, -1]])
+### !!! This comment may be half-true, check main code for most recent version !!!
+# np.prod(block_sizes) = X.size / X.shape[1];
+# number of unique values in block before
+# dimensionality reduction by "rank" parameter
+# (if specified); also the size of the block
+# itself; this means that if, for example,
+# block_sizes = [2, 3] then the matrix A
+# will be constructed from the same blocks
+# of size 2x3
+# in case of symm/skew-symm/unitary the number
+# of unique values changes in order to satisfy
+# constraints; so does the block size (but
+# patterns are still recognizible; like blocks
+# of size 2, 3 blocks on each row for symm [2, 3])
+block_sizes = np.array([3, 2])
+p = np.prod(block_sizes)
+
+method = "BCCB"
+### !!! This comment may be half-true, check main code for most recent version !!!
+# reduce number of unique values from which
+# matrix will be constructed from
+# np.prod(block_sizes) to rank
+# (not always interpretable like this in case
+# value of rank is close to np.prod(block_sizes))
+rank = None
+nx = X.shape[0]
+
+aF = lambda x: np.reshape(
+        fft2(
+            np.reshape(x, np.append(block_sizes, x.shape[1]), order="F").T
+        ).T,
+        np.array([p, x.shape[1]]),
+        order="F"
+    ) / np.sqrt(p)
+
+aFt = lambda x: aF(x.conj()).conj()
+
+fX = aF(X.conj())
+fY = aF(Y.conj())
+d = np.zeros((p, 1), dtype=np.complex128)
+
+if method == "BCCB":
+    for j in range(p):
+        denom = LA.norm(fX[j, :].conj().T)**2
+        d[j] = (fX[j, :] @ fY[j, :].conj().T).conj() / denom
+        
+elif method == "BCCBtls":
+    for j in range(p):
+        d[j] = tls(fX[j, :].conj().T, fY[j, :].conj().T).conj().T
+        
+elif method == "BCCBskewsymmetric":
+    for j in range(p):
+        fXj_inv = LA.pinv(np.reshape(fX[j, :], (-1, 1))).ravel()
+        d[j] = 1.0j * (fY[j, :] @ fXj_inv).imag
+
+elif method == "BCCBsymmetric":
+    for j in range(p):
+        fXj_inv = LA.pinv(np.reshape(fX[j, :], (-1, 1))).ravel()
+        d[j] = (fY[j, :] @ fXj_inv).real
+        
+elif method == "BCCBunitary":
+    for j in range(p):
+        fXj_inv = LA.pinv(np.reshape(fX[j, :], (-1, 1))).ravel()
+        d[j] = np.exp(1.0j * np.angle(fY[j, :] @ fXj_inv))
+        
+# returns a function handle that applies A
+if rank is not None:
+    res = np.diag(np.abs(fX @ fY.conj().T)) / LA.norm(fX.conj().T, axis=0)
+    idx = np.argpartition(res, kth=nx-rank)[:nx-rank]
+    d[idx] = 0
+    
+A = lambda x: aF(d.conj() * aFt(x))
+# eigenvalues are given by d
+eVals = d
+# use _, eVecs = LA.eig(A(np.eye(nx))) if needed; (nx = rank if needed)
+eVecs = None
+_, eVecs = LA.eig(A(np.eye(nx)))
+
+# print(A(np.eye(nx)))
+sns.heatmap(A(np.eye(nx)).real)
+# print(eVals)
+# print(eVecs)
+
+# F = np.kron(fft(np.eye(10)), fft(np.eye(5)))
+# sns.heatmap(F.real)
+# sns.heatmap(F.imag)
+
+
+===================================================================================
+================================ BC / BCtri / BCtls ===============================
+===================================================================================
+
+
+X = [1, 2, 3, 1; 4, 5, 6, 0; 7, 8, 9, 2; 10, 11, 12, -3; -1, -3, 6, 3;...
+     0, 0, -1, 1];
+Y = [2, 3, 1, -2; 5, 6, 0, 0; 8, 9, 2, 1; 11, 12, -3, -3; -3, 6, 3, 2;...
+     0, -1, 1, -1];
+s = [3, 2];
+p = prod(s);
+
+method = 'BCtri';
+
+rank = 4;
+[nx, nt] = size(X);
+r = min(nx, nt);
+% r = rank;
+
+p = prod(s);
+M = s(2); N = s(1);
+if isempty(s); error('Need to specify size of blocks.'); end
+% Equivalent to applying the block-DFT matrix F 
+% defined by F = kron(dftmtx(M),eye(N)) to the 
+% matrix X
+aF  =  @(x) reshape(fft(reshape(x,[s,size(x,2)]),[],2) ,[p,size(x,2)])...
+            /sqrt(M);
+aFt =  @(x) conj(aF(conj(x)));
+
+fX = aF(X); fY = aF(Y);
+d = cell(M,1);
+
+
+% Performs RQ decomposition
+function [R,Q,varargout] = rq(A)
+
+n = size(A,1);
+if nargout<3
+    [Q,R] = qr(flipud(A)',0);
+else
+    [Q,R,P1] = qr(flipud(A)',0);
+    % arrange permutation in right way
+    P(n+1-P1) = n:-1:1;
+    varargout{1} = P;
+end
+R = rot90(R',2);
+Q = flipud(Q');
+
+[n,m]=size(A);
+
+if n>m
+    R = [zeros(n,n-m), R];
+    Q = [zeros(n-m,m); Q];
+end  
+
+end
+
+
+function [Xhat] = tls(A,B)
+
+n = size(A,2);
+if size(A,1)~=size(B,1); error('Matrices are not conformant.'); end
+R1 = [A B];
+[~,~,V] = svd(R1,0);
+r = size(A,2);
+R = rq(V(:,r+1:end));Gamma = R(n+1:end,n-r+1:end);
+Z = R(1:n,n-r+1:end);
+Xhat = -Z/Gamma;
+
+end
+
+function [A, varargout] = piDMD(X,Y,method,varargin)
+
+[nx, nt] = size(X);
+
+if strcmp(method,'diagonal') || strcmp(method,'diagonalpinv')...
+        || strcmp(method,'diagonaltls')
+        
+    if nargin>3
+        d = varargin{1}; % arrange d into an nx-by-2 matrix
+        if numel(d) == 1
+            d = d*ones(nx,2);
+        elseif numel(d) == nx
+             d = repmat(d,[1,2]);
+        elseif any(size(d)~=[nx,2])
+            error('Diagonal number is not in an allowable format.')
+        end
+    else 
+        d = ones(nx,2); % default is for a diagonal matrix
+    end
+    % Allocate cells to build sparse matrix
+    Icell = cell(1,nx); Jcell = cell(1,nx); Rcell = cell(1,nx);
+    for j = 1:nx
+    l1 = max(j-(d(j,1)-1),1); l2 = min(j+(d(j,2)-1),nx);
+    % preparing to solve min||Cx-b|| along each row
+    C = X(l1:l2,:); b = Y(j,:);
+    if strcmp(method,'diagonal')
+            sol = b/C;
+    elseif strcmp(method,'diagonalpinv')
+            sol = b*pinv(C);
+    elseif strcmp(method,'diagonaltls')
+            sol = tls(C.',b.').';
+    end
+    Icell{j} = j*ones(1,1+l2-l1); Jcell{j} = l1:l2; Rcell{j} = sol;
+    end
+    Imat = cell2mat(Icell); Jmat = cell2mat(Jcell); Rmat = cell2mat(Rcell);
+    Asparse = sparse(Imat,Jmat,Rmat,nx,nx);
+    A = @(v) Asparse*v;
+
+    if nargout==2
+        eVals = eigs(Asparse,nx);
+        varargout{1} = eVals;
+    elseif nargout>2
+        [eVecs, eVals] = eigs(Asparse,nx);
+        varargout{1} = diag(eVals); varargout{2} = eVecs;
+    end
+
+else
+    error('The selected method doesn''t exist.');
+
+end
+
+end
+
+for j = 1:M
+    ls = (j-1)*N + (1:N);
+    if strcmp(method,'BC')
+        d{j} = fY(ls,:)/fX(ls,:);
+    elseif strcmp(method,'BCtri')
+        [d{j}, ~, ~] = piDMD(fX(ls,:),fY(ls,:),'diagonal',2);
+        d{j} = d{j}(eye(size(fX(ls,:),1)));
+    elseif strcmp(method,'BCtls')
+        d{j} = tls(fX(ls,:)',fY(ls,:)')';
+    end
+end 
+
+BD = blkdiag(d{:});
+A = @(v) aFt(BD*aF(v));
+
+[eVecs, eVals] = eig(A(eye(nx)));
+
+A(eye(nx))
+diag(eVals)
+eVecs
+
+
+===================================================================================
+================================ Toeplitz / Hankel ================================
+===================================================================================
+
+
+X = [1, 2, 3, 1; 4, 5, 6, 0; 7, 8, 9, 2; 10, 11, 12, -3; -1, -3, 6, 3;...
+     0, 0, -1, 1];
+Y = [2, 3, 1, -2; 5, 6, 0, 0; 8, 9, 2, 1; 11, 12, -3, -3; -3, 6, 3, 2;...
+     0, -1, 1, -1];
+
+method = 'toeplitz';
+[nx, nt] = size(X);
+
+if strcmp(method,'toeplitz'); J = eye(nx);
+elseif strcmp(method,'hankel'); J = fliplr(eye(nx)); end
+Am = fft([eye(nx) zeros(nx)].',[],1)'/sqrt(2*nx); % Define the left matrix
+B = fft([(J*X)' zeros(nt,nx)].',[],1)'/sqrt(2*nx); % Define the right matrix
+BtB = B'*B;
+AAt = ifft(fft([eye(nx) zeros(nx); zeros(nx,2*nx)]).').'; % Fast computation of A*A'
+y = diag(Am'*conj(Y)*B)'; % Construct the RHS of the linear system
+L = (AAt.*BtB.')'; % Construct the matrix for the linear system
+d = [y(1:end-1)/L(1:end-1,1:end-1) 0]; % Solve the linear system
+newA = ifft(fft(diag(d)).').'; % Convert the eigenvalues into the circulant matrix
+A = newA(1:nx,1:nx)*J; % Extract the Toeplitz matrix from the circulant matrix
+
+[eVecs, eVals] = eig(A);
+
+A
+diag(eVals)
+eVecs
+
+
+===================================================================================
+================= Circulant + (tls / unitary / symm / skew-symm) ==================
+===================================================================================
+
+
+X = [1, 2, 3, 1; 4, 5, 6, 0; 7, 8, 9, 2; 10, 11, 12, -3; -1, -3, 6, 3;...
+     0, 0, -1, 1];
+Y = [2, 3, 1, -2; 5, 6, 0, 0; 8, 9, 2, 1; 11, 12, -3, -3; -3, 6, 3, 2;...
+     0, -1, 1, -1];
+
+method = 'circulant';
+rank = 4;
+reduce_by_rank = 1;
+
+[nx, nt] = size(X);
+
+fX = fft(X); fY = fft(conj(Y));
+
+% Performs RQ decomposition
+function [R,Q,varargout] = rq(A)
+
+n = size(A,1);
+if nargout<3
+    [Q,R] = qr(flipud(A)',0);
+else
+    [Q,R,P1] = qr(flipud(A)',0);
+    % arrange permutation in right way
+    P(n+1-P1) = n:-1:1;
+    varargout{1} = P;
+end
+R = rot90(R',2);
+Q = flipud(Q');
+
+[n,m]=size(A);
+
+if n>m
+    R = [zeros(n,n-m), R];
+    Q = [zeros(n-m,m); Q];
+end  
+
+end
+
+
+function [Xhat] = tls(A,B)
+
+n = size(A,2);
+if size(A,1)~=size(B,1); error('Matrices are not conformant.'); end
+R1 = [A B];
+[~,~,V] = svd(R1,0);
+r = size(A,2);
+R = rq(V(:,r+1:end));Gamma = R(n+1:end,n-r+1:end);
+Z = R(1:n,n-r+1:end);
+Xhat = -Z/Gamma;
+
+end
+
+
+d = zeros(nx,1);
+if strcmp(method,'circulantTLS') % Solve in the total least squares sense
+    for j = 1:nx
+        d(j) = tls(fX(j,:)',fY(j,:)');
+    end
+
+else % Solve the other cases
+    d = diag(fX*fY')./vecnorm(fX,2,2).^2;
+    if strcmp(method,'circulantunitary'); d = exp(1i*angle(d));
+    elseif strcmp(method,'circulantsymmetric'); d = real(d);
+    elseif strcmp(method,'circulantskewsymmetric'); d = 1i*imag(d);
+    end
+end
+
+eVals = d; % These are the eigenvalues
+eVecs = fft(eye(nx)); % These are the eigenvectors
+
+if reduce_by_rank
+    res = diag(abs(fX*fY'))./vecnorm(fX')' % Identify least important eigenvalues
+    % [~,idx] = mink(res,nx-rank); % Remove least important eigenvalues
+    % d(idx) = 0; eVals(idx) = []; eVecs(:,idx) = [];
+end
+
+A = @(v) fft(d.*ifft(v)); % Reconstruct the operator in terms of FFTs
+
+% Check results
+A(eye(nx))
+eVals
+eVecs
+
+% One more test
+[eVecs, eVals] = eig(A(eye(nx)));
+diag(eVals)
+eVecs
+
+
+===================================================================================
+=================================== TEST MATRICES =================================
+===================================================================================
+============ OCTAVE ============:
+trueA = [-6.35618490e-01, -2.02686586e-01, -5.14366026e-01, ...
+        -9.15943429e-02, -9.39509332e-03,  1.56429488e-01, ...
+         3.22786766e-01,  8.76437008e-02, -2.50135192e-01, ...
+         2.88004460e-01; -6.01223032e-01, -1.78465702e-01,  1.21529609e-01, ...
+        -1.27786126e-02,  2.06722978e-01, -2.68324995e-01, ...
+        -5.48232076e-01, -3.02082219e-01,  1.49853445e-01, ...
+        -2.50494105e-01; 1.04401760e-01,  4.78164715e-02,  9.29362472e-05, ...
+        -6.57569813e-01,  8.92581736e-02,  4.83289117e-01, ...
+        -9.59227214e-02, -3.30144771e-01, -3.34850079e-01, ...
+        -2.87330966e-01; 1.13142342e-01, -1.90333437e-01,  9.42841705e-02, ...
+         2.80038915e-01,  8.37129335e-01,  2.28644240e-02, ...
+         1.59777827e-01,  1.04203800e-01, -3.35949194e-01, ...
+        -1.14468953e-01; 9.69376691e-02, -6.43759360e-01,  2.08717874e-01, ...
+         1.65384222e-01, -4.49557274e-01, -6.12963461e-02, ...
+        -1.08866618e-01,  7.03802040e-02, -5.12848180e-01, ...
+        -1.39944022e-01; -3.58584914e-02, -1.75408321e-01,  2.06165341e-02, ...
+         4.85337663e-01, -8.93638425e-02,  5.18116055e-01, ...
+         2.42778520e-01, -5.31514491e-01,  3.08046855e-01, ...
+        -1.38550815e-01; 3.79175086e-01, -2.32339184e-01, -7.51022704e-01, ...
+         9.59999620e-02,  7.65791480e-02,  3.83525435e-02, ...
+        -4.51144322e-01,  1.29131519e-02,  1.26516545e-01, ...
+        -4.42040057e-02; 7.28916708e-02, -5.98026998e-01,  1.23811272e-01, ...
+        -4.33339263e-01,  1.26057587e-01, -1.24655059e-02, ...
+         2.55996819e-01,  2.15119669e-01,  5.51879104e-01, ...
+        -3.88725154e-02; 6.29532304e-02, -1.44202200e-01,  2.73149396e-01, ...
+        -2.67148053e-02,  1.22326633e-01,  2.83133925e-01, ...
+        -3.71027233e-01, -9.67440763e-02, -1.43483912e-03, ...
+         8.11028382e-01; -2.16993758e-01,  1.04635818e-01,  1.17496867e-01, ...
+         1.41457243e-01, -4.02302302e-02,  5.61647350e-01, ...
+        -2.88097281e-01,  6.61775829e-01,  1.07260117e-01, ...
+        -2.42138699e-01];
+
+disp(['norm trueA is ' num2str(norm(trueA, 'fro'), 16)])
+disp(['det  trueA is ' num2str(det(trueA), 16)])
+
+X = [ 1.62434536, -0.61175641, -0.52817175, -1.07296862,  0.86540763, ...
+     -2.3015387 ,  1.74481176, -0.7612069 ,  0.3190391 , -0.24937038, ...
+      1.46210794, -2.06014071; -0.3224172 , -0.38405435,  1.13376944, ...
+     -1.09989127, -0.17242821, -0.87785842,  0.04221375,  0.58281521, ...
+     -1.10061918,  1.14472371,  0.90159072,  0.50249434;  0.90085595, ...
+     -0.68372786, -0.12289023, -0.93576943, -0.26788808,  0.53035547, ...
+     -0.69166075, -0.39675353, -0.6871727 , -0.84520564, -0.67124613, ...
+     -0.0126646 ; -1.11731035,  0.2344157 ,  1.65980218,  0.74204416, ...
+     -0.19183555, -0.88762896, -0.74715829,  1.6924546 ,  0.05080775, ...
+     -0.63699565,  0.19091548,  2.10025514;  0.12015895,  0.61720311, ...
+      0.30017032, -0.35224985, -1.1425182 , -0.34934272, -0.20889423, ...
+      0.58662319,  0.83898341,  0.93110208,  0.28558733,  0.88514116; ...
+     -0.75439794,  1.25286816,  0.51292982, -0.29809284,  0.48851815, ...
+     -0.07557171,  1.13162939,  1.51981682,  2.18557541, -1.39649634, ...
+     -1.44411381, -0.50446586;  0.16003707,  0.87616892,  0.31563495, ...
+     -2.02220122, -0.30620401,  0.82797464,  0.23009474,  0.76201118, ...
+     -0.22232814, -0.20075807,  0.18656139,  0.41005165;  0.19829972, ...
+      0.11900865, -0.67066229,  0.37756379,  0.12182127,  1.12948391, ...
+      1.19891788,  0.18515642, -0.37528495, -0.63873041,  0.42349435, ...
+      0.07734007; -0.34385368,  0.04359686, -0.62000084,  0.69803203, ...
+     -0.44712856,  1.2245077 ,  0.40349164,  0.59357852, -1.09491185, ...
+      0.16938243,  0.74055645, -0.9537006;  -0.26621851,  0.03261455, ...
+     -1.37311732,  0.31515939,  0.84616065, -0.85951594,  0.35054598, ...
+     -1.31228341, -0.03869551, -1.61577235,  1.12141771,  0.40890054];
+
+disp(['norm X is ' num2str(norm(X, 'fro'), 16)])
+
+Y_rand = [ 0.79502609, -0.37443832,  0.1340482 ,  1.20205486,  0.28474811, ...
+           0.26246745,  0.2764993 , -0.7332716 ,  0.83600472,  1.54335911, ...
+           0.75880566,  0.88490881; -0.3224172 , -0.38405435,  1.13376944, ...
+          -1.09989127, -0.17242821, -0.87785842,  0.04221375,  0.58281521, ...
+          -1.10061918,  1.14472371,  0.90159072,  0.50249434;  0.90085595, ...
+          -0.68372786, -0.12289023, -0.93576943, -0.26788808,  0.53035547, ...
+          -0.69166075, -0.39675353, -0.6871727 , -0.84520564, -0.67124613, ...
+          -0.0126646;  -1.11731035,  0.2344157 ,  1.65980218,  0.74204416, ...
+          -0.19183555, -0.88762896, -0.74715829,  1.6924546 ,  0.05080775, ...
+          -0.63699565,  0.19091548,  2.10025514;  0.12015895,  0.61720311, ...
+           0.30017032, -0.35224985, -1.1425182 , -0.34934272, -0.20889423, ...
+           0.58662319,  0.83898341,  0.93110208,  0.28558733,  0.88514116; ...
+          -0.75439794,  1.25286816,  0.51292982, -0.29809284,  0.48851815, ...
+          -0.07557171,  1.13162939,  1.51981682,  2.18557541, -1.39649634, ...
+          -1.44411381, -0.50446586;  0.16003707,  0.87616892,  0.31563495, ...
+          -2.02220122, -0.30620401,  0.82797464,  0.23009474,  0.76201118, ...
+          -0.22232814, -0.20075807,  0.18656139,  0.41005165;  0.19829972, ...
+           0.11900865, -0.67066229,  0.37756379,  0.12182127,  1.12948391, ...
+           1.19891788,  0.18515642, -0.37528495, -0.63873041,  0.42349435, ...
+           0.07734007; -0.34385368,  0.04359686, -0.62000084,  0.69803203, ...
+          -0.44712856,  1.2245077 ,  0.40349164,  0.59357852, -1.09491185, ...
+           0.16938243,  0.74055645, -0.9537006;  -0.26621851,  0.03261455, ...
+          -1.37311732,  0.31515939,  0.84616065, -0.85951594,  0.35054598, ...
+          -1.31228341, -0.03869551, -1.61577235,  1.12141771,  0.40890054];
+          
+disp(['norm Y_rand is ' num2str(norm(Y_rand, 'fro'), 16)])
+
+X_rand = [-0.02461696, -0.77516162,  1.27375593,  1.96710175, -1.85798186, ...
+           1.23616403,  1.62765075,  0.3380117 , -1.19926803,  0.86334532, ...
+          -0.1809203 , -0.60392063; -1.23005814,  0.5505375 ,  0.79280687, ...
+          -0.62353073,  0.52057634, -1.14434139,  0.80186103,  0.0465673 , ...
+          -0.18656977, -0.10174587,  0.86888616,  0.75041164;  0.52946532, ...
+           0.13770121,  0.07782113,  0.61838026,  0.23249456,  0.68255141, ...
+          -0.31011677, -2.43483776,  1.0388246 ,  2.18697965,  0.44136444, ...
+          -0.10015523; -0.13644474, -0.11905419,  0.01740941, -1.12201873, ...
+          -0.51709446, -0.99702683,  0.24879916, -0.29664115,  0.49521132, ...
+          -0.17470316,  0.98633519,  0.2135339 ;  2.19069973, -1.89636092, ...
+          -0.64691669,  0.90148689,  2.52832571, -0.24863478,  0.04366899, ...
+          -0.22631424,  1.33145711, -0.28730786,  0.68006984, -0.3198016 ; ...
+          -1.27255876,  0.31354772,  0.50318481,  1.29322588, -0.11044703, ...
+          -0.61736206,  0.5627611 ,  0.24073709,  0.28066508, -0.0731127 , ...
+           1.16033857,  0.36949272;  1.90465871,  1.1110567 ,  0.6590498 , ...
+          -1.62743834,  0.60231928,  0.4202822 ,  0.81095167,  1.04444209, ...
+          -0.40087819,  0.82400562, -0.56230543,  1.95487808; -1.33195167, ...
+          -1.76068856, -1.65072127, -0.89055558, -1.1191154 ,  1.9560789 , ...
+          -0.3264995 , -1.34267579,  1.11438298, -0.58652394, -1.23685338, ...
+           0.87583893;  0.62336218, -0.43495668,  1.40754   ,  0.12910158, ...
+           1.6169496 ,  0.50274088,  1.55880554,  0.1094027 , -1.2197444 , ...
+           2.44936865, -0.54577417, -0.19883786; -0.7003985 , -0.20339445, ...
+           0.24266944,  0.20183018,  0.66102029,  1.79215821, -0.12046457, ...
+          -1.23312074, -1.18231813, -0.66575452, -1.67419581,  0.82502982];
+          
+disp(['norm X_rand is ' num2str(norm(X_rand, 'fro'), 16)])
+
+============ PYTHON ============:
+trueA = np.array([[-6.35618490e-01, -2.02686586e-01, -5.14366026e-01, -9.15943429e-02, -9.39509332e-03,  1.56429488e-01,
+                    3.22786766e-01,  8.76437008e-02, -2.50135192e-01,  2.88004460e-01],
+                  
+                  [-6.01223032e-01, -1.78465702e-01,  1.21529609e-01, -1.27786126e-02,  2.06722978e-01, -2.68324995e-01,
+                   -5.48232076e-01, -3.02082219e-01,  1.49853445e-01, -2.50494105e-01],
+                  
+                  [ 1.04401760e-01,  4.78164715e-02,  9.29362472e-05, -6.57569813e-01,  8.92581736e-02,  4.83289117e-01,
+                   -9.59227214e-02, -3.30144771e-01, -3.34850079e-01, -2.87330966e-01],
+                  
+                  [ 1.13142342e-01, -1.90333437e-01,  9.42841705e-02,  2.80038915e-01,  8.37129335e-01,  2.28644240e-02,
+                    1.59777827e-01,  1.04203800e-01, -3.35949194e-01, -1.14468953e-01],
+                  
+                  [ 9.69376691e-02, -6.43759360e-01,  2.08717874e-01,  1.65384222e-01, -4.49557274e-01, -6.12963461e-02,
+                   -1.08866618e-01,  7.03802040e-02, -5.12848180e-01, -1.39944022e-01],
+                  
+                  [-3.58584914e-02, -1.75408321e-01,  2.06165341e-02,  4.85337663e-01, -8.93638425e-02,  5.18116055e-01,
+                    2.42778520e-01, -5.31514491e-01,  3.08046855e-01, -1.38550815e-01],
+                  
+                  [ 3.79175086e-01, -2.32339184e-01, -7.51022704e-01,  9.59999620e-02,  7.65791480e-02,  3.83525435e-02,
+                   -4.51144322e-01,  1.29131519e-02,  1.26516545e-01, -4.42040057e-02],
+                  
+                  [ 7.28916708e-02, -5.98026998e-01,  1.23811272e-01, -4.33339263e-01,  1.26057587e-01, -1.24655059e-02,
+                    2.55996819e-01,  2.15119669e-01,  5.51879104e-01, -3.88725154e-02],
+                  
+                  [ 6.29532304e-02, -1.44202200e-01,  2.73149396e-01, -2.67148053e-02,  1.22326633e-01,  2.83133925e-01,
+                   -3.71027233e-01, -9.67440763e-02, -1.43483912e-03,  8.11028382e-01],
+                  
+                  [-2.16993758e-01,  1.04635818e-01,  1.17496867e-01,  1.41457243e-01, -4.02302302e-02,  5.61647350e-01,
+                   -2.88097281e-01,  6.61775829e-01,  1.07260117e-01, -2.42138699e-01]])
+
+X = np.array([[ 1.62434536, -0.61175641, -0.52817175, -1.07296862,  0.86540763,
+               -2.3015387 ,  1.74481176, -0.7612069 ,  0.3190391 , -0.24937038,  1.46210794, -2.06014071],
+              
+              [-0.3224172 , -0.38405435,  1.13376944, -1.09989127, -0.17242821,
+               -0.87785842,  0.04221375,  0.58281521, -1.10061918,  1.14472371,  0.90159072,  0.50249434],
+              
+              [ 0.90085595, -0.68372786, -0.12289023, -0.93576943, -0.26788808,
+                0.53035547, -0.69166075, -0.39675353, -0.6871727 , -0.84520564, -0.67124613, -0.0126646 ],
+              
+              [-1.11731035,  0.2344157 ,  1.65980218,  0.74204416, -0.19183555,
+               -0.88762896, -0.74715829,  1.6924546 ,  0.05080775, -0.63699565,  0.19091548,  2.10025514],
+              
+              [ 0.12015895,  0.61720311,  0.30017032, -0.35224985, -1.1425182 ,
+               -0.34934272, -0.20889423,  0.58662319,  0.83898341,  0.93110208,  0.28558733,  0.88514116],
+              
+              [-0.75439794,  1.25286816,  0.51292982, -0.29809284,  0.48851815,
+               -0.07557171,  1.13162939,  1.51981682,  2.18557541, -1.39649634, -1.44411381, -0.50446586],
+              
+              [ 0.16003707,  0.87616892,  0.31563495, -2.02220122, -0.30620401,
+                0.82797464,  0.23009474,  0.76201118, -0.22232814, -0.20075807,  0.18656139,  0.41005165],
+              
+              [ 0.19829972,  0.11900865, -0.67066229,  0.37756379,  0.12182127,
+                1.12948391,  1.19891788,  0.18515642, -0.37528495, -0.63873041,  0.42349435,  0.07734007],
+              
+              [-0.34385368,  0.04359686, -0.62000084,  0.69803203, -0.44712856,
+                1.2245077 ,  0.40349164,  0.59357852, -1.09491185,  0.16938243,  0.74055645, -0.9537006 ],
+              
+              [-0.26621851,  0.03261455, -1.37311732,  0.31515939,  0.84616065,
+               -0.85951594,  0.35054598, -1.31228341, -0.03869551, -1.61577235,  1.12141771,  0.40890054]])
+
+Y_rand = np.array([[ 0.79502609, -0.37443832,  0.1340482 ,  1.20205486,  0.28474811,
+                     0.26246745,  0.2764993 , -0.7332716 ,  0.83600472,  1.54335911,  0.75880566,  0.88490881],
+                   
+                   [-0.3224172 , -0.38405435,  1.13376944, -1.09989127, -0.17242821,
+                    -0.87785842,  0.04221375,  0.58281521, -1.10061918,  1.14472371,  0.90159072,  0.50249434],
+                   
+                   [ 0.90085595, -0.68372786, -0.12289023, -0.93576943, -0.26788808,
+                     0.53035547, -0.69166075, -0.39675353, -0.6871727 , -0.84520564, -0.67124613, -0.0126646 ],
+                   
+                   [-1.11731035,  0.2344157 ,  1.65980218,  0.74204416, -0.19183555,
+                    -0.88762896, -0.74715829,  1.6924546 ,  0.05080775, -0.63699565,  0.19091548,  2.10025514],
+                   
+                   [ 0.12015895,  0.61720311,  0.30017032, -0.35224985, -1.1425182 ,
+                    -0.34934272, -0.20889423,  0.58662319,  0.83898341,  0.93110208,  0.28558733,  0.88514116],
+                   
+                   [-0.75439794,  1.25286816,  0.51292982, -0.29809284,  0.48851815,
+                    -0.07557171,  1.13162939,  1.51981682,  2.18557541, -1.39649634, -1.44411381, -0.50446586],
+                   
+                   [ 0.16003707,  0.87616892,  0.31563495, -2.02220122, -0.30620401,
+                     0.82797464,  0.23009474,  0.76201118, -0.22232814, -0.20075807,  0.18656139,  0.41005165],
+                   
+                   [ 0.19829972,  0.11900865, -0.67066229,  0.37756379,  0.12182127,
+                     1.12948391,  1.19891788,  0.18515642, -0.37528495, -0.63873041,  0.42349435,  0.07734007],
+                   
+                   [-0.34385368,  0.04359686, -0.62000084,  0.69803203, -0.44712856,
+                     1.2245077 ,  0.40349164,  0.59357852, -1.09491185,  0.16938243,  0.74055645, -0.9537006 ],
+                   
+                   [-0.26621851,  0.03261455, -1.37311732,  0.31515939,  0.84616065,
+                    -0.85951594,  0.35054598, -1.31228341, -0.03869551, -1.61577235,  1.12141771,  0.40890054]])
+
+X_rand = np.array([[-0.02461696, -0.77516162,  1.27375593,  1.96710175, -1.85798186,
+                     1.23616403,  1.62765075,  0.3380117 , -1.19926803,  0.86334532, -0.1809203 , -0.60392063],
+                   
+                   [-1.23005814,  0.5505375 ,  0.79280687, -0.62353073,  0.52057634,
+                    -1.14434139,  0.80186103,  0.0465673 , -0.18656977, -0.10174587,  0.86888616,  0.75041164],
+                   
+                   [ 0.52946532,  0.13770121,  0.07782113,  0.61838026,  0.23249456,
+                     0.68255141, -0.31011677, -2.43483776,  1.0388246 ,  2.18697965,  0.44136444, -0.10015523],
+                   
+                   [-0.13644474, -0.11905419,  0.01740941, -1.12201873, -0.51709446,
+                    -0.99702683,  0.24879916, -0.29664115,  0.49521132, -0.17470316,  0.98633519,  0.2135339 ],
+                   
+                   [ 2.19069973, -1.89636092, -0.64691669,  0.90148689,  2.52832571,
+                    -0.24863478,  0.04366899, -0.22631424,  1.33145711, -0.28730786,  0.68006984, -0.3198016 ],
+                   
+                   [-1.27255876,  0.31354772,  0.50318481,  1.29322588, -0.11044703,
+                    -0.61736206,  0.5627611 ,  0.24073709,  0.28066508, -0.0731127 ,  1.16033857,  0.36949272],
+                   
+                   [ 1.90465871,  1.1110567 ,  0.6590498 , -1.62743834,  0.60231928,
+                     0.4202822 ,  0.81095167,  1.04444209, -0.40087819,  0.82400562, -0.56230543,  1.95487808],
+                   
+                   [-1.33195167, -1.76068856, -1.65072127, -0.89055558, -1.1191154 ,
+                     1.9560789 , -0.3264995 , -1.34267579,  1.11438298, -0.58652394, -1.23685338,  0.87583893],
+                   
+                   [ 0.62336218, -0.43495668,  1.40754   ,  0.12910158,  1.6169496 ,
+                     0.50274088,  1.55880554,  0.1094027 , -1.2197444 ,  2.44936865, -0.54577417, -0.19883786],
+                   
+                   [-0.7003985 , -0.20339445,  0.24266944,  0.20183018,  0.66102029,
+                     1.79215821, -0.12046457, -1.23312074, -1.18231813, -0.66575452, -1.67419581,  0.82502982]])
+
+print(LA.norm(trueA, "fro"))
+print(LA.det(trueA))
+print(LA.norm(X, "fro"))
+print(LA.norm(Y_rand, "fro"))
+print(LA.norm(X_rand, "fro"))
